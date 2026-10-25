@@ -249,7 +249,7 @@ test('mailbox: last 5, newest first, names mapped, body never kept', () => {
 })
 
 // Stands for the engine beneath the mod: every read answers from fixtures.
-function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object; permissionMode?: string } = {}) {
+function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object; permissionMode?: string; failMode?: boolean } = {}) {
   const runs: string[][] = []
   const calls: string[] = []
   // The shared machine cache: missing until the plugin writes it.
@@ -291,6 +291,7 @@ function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca
   on('process.run', (_$: any, e: any) => {
     runs.push(e.argv)
     const a = e.argv.join(' ')
+    if (opts.failMode && e.argv[0] === 'python3') return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (opts.garbageOrca && a.startsWith('orca')) return { value: { exitCode: 0, stdout: 'token=abc123 not json', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (opts.failOrca && a.startsWith('orca')) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const stdout = e.argv[0] === 'python3' ? (opts.permissionMode ?? 'no report yet')
@@ -609,6 +610,25 @@ for (const mode of ['bypass', 'plan']) {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await ui.find({ type: 'Text', text: new RegExp(`^Alpha: ${mode}$`) }))?.props.color).toBe(mode === 'bypass' ? 'success' : 'error')
     expect(runs.some(argv => argv[0] === 'python3' && argv[3] === '/sessions/sample.jsonl')).toBe(true)
+    await ui.unmount()
+  })
+}
+
+
+for (const nextMode of ['plan', 'no report yet']) {
+  test(`mode ${nextMode} replaces old bypass even when the next inventory read fails`, async ($, on) => {
+    const options = { permissionMode: 'bypass', failMode: false, failOrca: false, config: { ...CONFIG, coordinators: [{ ...CONFIG.coordinators[0], sessionFile: '/sessions/sample.jsonl' }] } }
+    const runs = engine(on, options)
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Text', text: /^Alpha: bypass$/ }))?.props.color).toBe('success')
+    options.permissionMode = nextMode
+    options.failOrca = true
+    options.failMode = nextMode === 'no report yet'
+    await ui.press({ key: 'refresh' })
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^Alpha: ${nextMode}$`) }))?.props.color).toBe('error')
+    expect(await ui.find({ type: 'Text', text: /^Alpha: bypass$/ })).toBe(undefined)
+    expect(await ui.find({ type: 'Text', text: /orca exited 1/ })).toBeDefined()
     await ui.unmount()
   })
 }

@@ -60,6 +60,8 @@ A small read-only subprocess scans its complete records backward and returns onl
 `permissionMode`, normalized to `bypass`, `auto`, `plan`, or `manual`. It returns
 no transcript text or other session fields. Unknown modes, missing paths and
 failed reads say `no report yet`; every value other than bypass is red.
+Mode results publish independently of terminal inventory, so an inventory failure
+cannot retain an older green bypass label.
 Terminal footer labels and role documents never establish the running mode.
 Update the `sessionFile` folder if the coordinator changes cwd, and keep terminal
 handles current.

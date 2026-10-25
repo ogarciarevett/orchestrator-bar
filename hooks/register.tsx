@@ -94,12 +94,15 @@ async function readConfig($: $, path: string) {
 async function readRemote($: $, c: Config) {
   const now = () => Date.now()
   await Promise.all([
-    refresh($, 'coordinators', async () => {
+    refresh($, 'modes', async () => {
       const home = (await $.env.get('HOME')) ?? ''
       const sessions = c.coordinators.map(co => co.sessionFile ? expandHome(co.sessionFile, home) : '')
       const directory = (path: string) => path.slice(0, path.lastIndexOf('/'))
       // Shared cwd folders need exact hints, otherwise one coordinator could borrow another's mode.
-      const modes = await Promise.all(sessions.map(path => path ? run($, permissionModeCommand(path, sessions.filter(other => directory(other) === directory(path)).length === 1)).then(value => ['bypass', 'auto', 'manual', 'plan'].includes(value.trim()) ? value.trim() : 'no report yet', () => 'no report yet') : 'no report yet'))
+      const values = await Promise.all(sessions.map(path => path ? run($, permissionModeCommand(path, sessions.filter(other => directory(other) === directory(path)).length === 1)).then(value => ['bypass', 'auto', 'manual', 'plan'].includes(value.trim()) ? value.trim() : 'no report yet', () => 'no report yet') : 'no report yet'))
+      return Object.fromEntries(c.coordinators.map((co, i) => [co.name, values[i]!]))
+    }),
+    refresh($, 'coordinators', async () => {
       const terminalsOut = await run($, c.terminalsCommand)
       const terminals = parseTerminals(terminalsOut)
       const prev = (await read($, snapshot)).coordinators?.value ?? []
@@ -139,7 +142,7 @@ async function readRemote($: $, c: Config) {
           .map(w => ({ ...w, worktreePath: w.worktreePath ?? paths.get(w.handle ?? ''), model: inventory.find((t: any) => t.handle === w.handle)?.model ?? w.model, ...(w.handle && blocked.has(w.handle) ? { state: 'permission' as const } : {}) }))
           .sort((a, b) => ORDER[a.state] - ORDER[b.state])
         const workers = mergeWorkers(carryDone(prev.find(p => p.name === co.name)?.workers ?? [], live, now()))
-        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live, ownTask: co.terminal ? { name: co.name, handle: co.terminal, state: 'running' as const, worktreePath: paths.get(co.terminal), model: co.model } : undefined, runMode: modes[i], reports: parseCoordinatorReports(screens.get(co.terminal ?? '') ?? '') }
+        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live, ownTask: co.terminal ? { name: co.name, handle: co.terminal, state: 'running' as const, worktreePath: paths.get(co.terminal), model: co.model } : undefined, reports: parseCoordinatorReports(screens.get(co.terminal ?? '') ?? '') }
       })
       return result
     }),
@@ -364,7 +367,7 @@ export const register: Register = (on, options) => {
         )}
         <Box flexDirection="column">
           {cfg.coordinators.map(co => {
-            const mode = coords.find(c => c.name === co.name)?.runMode ?? 'no report yet'
+            const mode = s.modes?.error ? 'no report yet' : s.modes?.value?.[co.name] ?? 'no report yet'
             return <Text color={mode === 'bypass' ? 'success' : 'error'} wrap="wrap">{mask(co.name)}: {mode}</Text>
           })}
         </Box>

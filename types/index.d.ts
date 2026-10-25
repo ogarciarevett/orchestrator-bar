@@ -61,7 +61,6 @@ export type CoordinatorRow = {
   taskWorkers?: WorkerRow[]
   ownTask?: WorkerRow
   reports?: TaskStatus[]
-  runMode?: string
   isWaitingPermission?: boolean
 }
 
@@ -81,6 +80,7 @@ export type Section<T> = { value?: T; at: number; error?: string }
 export type Snapshot = {
   config?: Section<Config>
   coordinators?: Section<CoordinatorRow[]>
+  modes?: Section<Record<string, string>>
   tasks?: Section<TaskGroup[]>
   environments?: Section<EnvRow[]>
   prs?: Section<RepoRow[]>
