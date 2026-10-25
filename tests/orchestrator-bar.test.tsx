@@ -5,6 +5,10 @@ import {
   parseTaskStatus,
   taskGroups,
   taskIsStale,
+  taskTitle,
+  taskValue,
+  madridTime,
+  parseCoordinatorReports,
   carryDone,
   isConfiguredSession,
   MACHINE_TTL_MS,
@@ -245,7 +249,7 @@ test('mailbox: last 5, newest first, names mapped, body never kept', () => {
 })
 
 // Stands for the engine beneath the mod: every read answers from fixtures.
-function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object } = {}) {
+function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object; permissionMode?: string; failMode?: boolean } = {}) {
   const runs: string[][] = []
   const calls: string[] = []
   // The shared machine cache: missing until the plugin writes it.
@@ -287,9 +291,11 @@ function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca
   on('process.run', (_$: any, e: any) => {
     runs.push(e.argv)
     const a = e.argv.join(' ')
+    if (opts.failMode && e.argv[0] === 'python3') return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (opts.garbageOrca && a.startsWith('orca')) return { value: { exitCode: 0, stdout: 'token=abc123 not json', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (opts.failOrca && a.startsWith('orca')) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    const stdout = a.includes('terminal read')
+    const stdout = e.argv[0] === 'python3' ? (opts.permissionMode ?? 'no report yet')
+      : a.includes('terminal read')
       ? screen(...(['term_t1', 'term_alpha'].includes(e.argv[4]) ? ['Do you want to proceed?', '❯ 1. Yes', 'Esc to cancel'] : ['SECRET=hunter2', '> ']))
       : a.includes('terminal list')
       ? terminalsAt(Date.now())
@@ -382,7 +388,7 @@ test('a section whose first read fails says so instead of waiting', async ($, on
   engine(on, { failOrca: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /never read/ }))?.text).toBe('never read')
+  expect((await ui.find({ type: 'Text', text: /^no report yet$/ }))?.text).toBe('no report yet')
   expect((await ui.find({ type: 'Text', text: /stale:/ }))?.text).toMatch(/⚠ stale: orca exited 1/)
   // The other sections still draw.
   expect((await ui.find({ type: 'Text', text: /^normal$/ }))?.text).toBe('normal')
@@ -423,7 +429,7 @@ test('the band sums it up while the pane is closed', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const band = await $.ui.mount({ plugin: 'orchestrator-bar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 160 } } as any)
   const text = (await band.find({ type: 'Text', text: /◆ orchestrator-bar/ }))?.text ?? ''
-  expect(text).toMatch(/● 4 workers  ■ 2 permission  ◐ 1 need you  ◌ 1 stale  ▲ envs 1\/1  ◇ 1 PRs  ▣ load 11\/18 mem 52% swap 5\.8G/)
+  expect(text).toMatch(/● 4 workers  ■ 2 permission  ◐ 1 need you  1 without recent output  ▲ envs 1\/1  ◇ 1 PRs  ▣ load 11\/18 mem 52% swap 5\.8G/)
   await band.unmount()
 })
 
@@ -475,8 +481,8 @@ test('tasks: parent before sub-coordinator, one row per handle, status or title 
   const groups = taskGroups(config, coords, new Map([['/w/task', STATUS]]), NOW)
   expect(groups.map(g => g.coordinator)).toEqual(['Root', 'Root / Child'])
   expect(groups[0]?.rows.length).toBe(2)
-  expect(groups[0]?.rows[0]).toEqual({ ...STATUS, key: 'one', stale: false, fallback: false })
-  expect(groups[1]?.rows[0]).toEqual({ task: 'Review PR #9', pr: '#9', state: 'input', left: 'unknown', eta_utc: '', updated: '', key: 'two', stale: true, fallback: true })
+  expect(groups[0]?.rows[0]).toEqual({ ...STATUS, terminal: 'one', coordinator: 'Root', model: '', key: 'one', stale: false, fallback: false })
+  expect(groups[1]?.rows[0]).toEqual({ task: 'Review PR #9', pr: '#9', state: 'input', left: '', eta_utc: '', updated: '', terminal: 'two', coordinator: 'Root / Child', model: '', key: 'two', stale: true, fallback: true })
   for (const coordinators of [[{ name: 'A', parent: 'B' }], [{ name: 'A', parent: 'A' }], [{ name: 'A', parent: 'B' }, { name: 'B', parent: 'A' }], [{ name: 'A' }, { name: 'A' }]]) {
     expect(() => parseConfig(JSON.stringify({ coordinators }))).toThrow()
   }
@@ -529,3 +535,100 @@ test('config migration: invalid legacy data never enables collectors or writes c
   expect(runs.migration().legacyReads).toBe(1)
   expect([...runs]).toEqual([])
 })
+
+
+test('task summaries remove glyphs, keep word boundaries and format Madrid winter and summer', () => {
+  expect(taskTitle('⠴ Fix login redirects | workspace', 12)).toBe('Fix login…')
+  expect(taskTitle('x'.repeat(100), 10)).toBe('Task')
+  for (const value of ['', '?', 'unknown', 'stale']) expect(taskValue(value)).toBe('no report yet')
+  expect(madridTime('2026-01-01T12:00:00Z')).toBe('01/01 13:00')
+  expect(madridTime('2026-07-01T23:00:00Z')).toBe('02/07 01:00')
+  expect(madridTime('')).toBe('no report yet')
+})
+
+test('coordinator reports accept explicit report lines and discard unrelated screen text', () => {
+  const rows = parseCoordinatorReports(screen('SECRET=hunter2', 'Missing and why: GPU results: queue running.', 'Waiting (drafts, named blockers): hyperag #6 (owner token).', 'Missing and why: Paper pass: review running.'))
+  expect(rows.map(r => r.left)).toEqual(['Paper pass: review running.', 'hyperag #6 (owner token).'])
+  expect(JSON.stringify(rows)).not.toMatch(/hunter2/)
+  expect(parseCoordinatorReports('bad')).toEqual([])
+})
+
+for (const width of [24, 44, 90]) {
+  test(`Tasks at ${width} columns: two columns, expandable details and a real PR link`, async ($, on) => {
+    engine(on, { status: { ...STATUS, pr: 'https://github.com/example-org/web/pull/12', updated: new Date().toISOString() } })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: width }, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /ETA Madrid/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ETA UTC/ })).toBe(undefined)
+    expect(await ui.find({ type: 'Text', text: /^Left:/ })).toBe(undefined)
+    await ui.press({ key: 'expand-task-term_t1' })
+    for (const words of [/Left: Review and merge/, /Last update \(Madrid\):/, /Terminal: term_t1/, /Coordinator: Alpha/, /Model: no report yet/]) expect(await ui.find({ type: 'Text', text: words })).toBeDefined()
+    expect((await ui.find({ type: 'Link', text: /pull\/12/ }))?.props.href).toBe('https://github.com/example-org/web/pull/12')
+    await ui.press({ key: 'expand-task-term_t1' })
+    expect(await ui.find({ type: 'Text', text: /^Left:/ })).toBe(undefined)
+    expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
+    await ui.unmount()
+  })
+}
+
+test('a sub-coordinator keeps its own status row when its terminal is excluded from workers', () => {
+  const config = parseConfig(JSON.stringify({ coordinators: [{ name: 'Root' }, { name: 'Sub', parent: 'Root', terminal: 'term_sub' }] }))
+  const groups = taskGroups(config, [{ name: 'Sub', terminal: 'term_sub', model: '', workers: [], ownTask: { name: 'Sub', state: 'running', handle: 'term_sub', worktreePath: '/w/sub' }, reports: [] }], new Map([['/w/sub', STATUS]]), NOW)
+  expect(groups[0]?.coordinator).toBe('Root / Sub')
+  expect(groups[0]?.rows[0]?.terminal).toBe('term_sub')
+  expect(groups[0]?.rows[0]?.task).toBe('Fix login')
+})
+
+
+test('run-mode lines stay visible when Coordinators is collapsed', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-coordinators' })
+  expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /1 without recent output/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /◌ 1 stale/ })).toBe(undefined)
+  await ui.unmount()
+})
+
+
+test('configured coordinator mode remains visible when the first collection fails', async ($, on) => {
+  engine(on, { failOrca: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /^(waiting|never read)$/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /^no report yet$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+
+for (const mode of ['bypass', 'plan']) {
+  test(`session mode ${mode} comes from the field-only reader`, async ($, on) => {
+    const runs = engine(on, { permissionMode: mode, config: { ...CONFIG, coordinators: [{ ...CONFIG.coordinators[0], sessionFile: '/sessions/sample.jsonl' }] } })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^Alpha: ${mode}$`) }))?.props.color).toBe(mode === 'bypass' ? 'success' : 'error')
+    expect(runs.some(argv => argv[0] === 'python3' && argv[3] === '/sessions/sample.jsonl')).toBe(true)
+    await ui.unmount()
+  })
+}
+
+
+for (const nextMode of ['plan', 'no report yet']) {
+  test(`mode ${nextMode} replaces old bypass even when the next inventory read fails`, async ($, on) => {
+    const options = { permissionMode: 'bypass', failMode: false, failOrca: false, config: { ...CONFIG, coordinators: [{ ...CONFIG.coordinators[0], sessionFile: '/sessions/sample.jsonl' }] } }
+    const runs = engine(on, options)
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Text', text: /^Alpha: bypass$/ }))?.props.color).toBe('success')
+    options.permissionMode = nextMode
+    options.failOrca = true
+    options.failMode = nextMode === 'no report yet'
+    await ui.press({ key: 'refresh' })
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^Alpha: ${nextMode}$`) }))?.props.color).toBe('error')
+    expect(await ui.find({ type: 'Text', text: /^Alpha: bypass$/ })).toBe(undefined)
+    expect(await ui.find({ type: 'Text', text: /orca exited 1/ })).toBeDefined()
+    await ui.unmount()
+  })
+}

@@ -84,12 +84,15 @@ migration, only the new path is read. Restart the configured session after updat
    every agent terminal under its `worktrees` (title and state only). A worker name
    shows once, with its newest state; done workers fold into one `+N done` line.
    A coordinator or worker whose screen shows a permission dialog is red and
-   listed first. Input rows are red, stale rows are yellow.
-2. **Tasks**: one row per active worker, grouped by coordinator and sub-coordinator,
-   with task, PR, state, what is left, ETA (UTC), and last update. Workers write
-   `.orca/task-status.json` in their worktree; missing files fall back to terminal
-   titles, with unknown progress and ETA. Updates at least 20 minutes old are
-   flagged stale. See [the format and example](docs/task-status.md).
+   listed first. Input rows are red, stale rows are yellow. Each coordinator also
+   shows its observed run mode at the top, even when the section is collapsed;
+   every mode other than bypass is red.
+2. **Tasks**: short task title and ETA in Madrid time, grouped by coordinator and
+   sub-coordinator. Click to open the full report: PR link, state, remaining work,
+   last update, terminal ID, coordinator and model. Workers write
+   `.orca/task-status.json`; terminal titles and explicit coordinator reports
+   supply fallback rows. Missing values say `no report yet`.
+   See [the format and example](docs/task-status.md).
 3. **Environments**: per environment, the HTTP code of `/ready`, the state field of
    the status endpoint, and the time of the last check.
 4. **Open PRs** per repo: count and numbers; a PR older than 24 hours is yellow.
@@ -131,7 +134,7 @@ columns (handles, models, times, meters) drop out.
 | --- | --- | --- |
 | `pollSeconds` | `60` | Interval for remote reads (workers, environments, PRs, usage). Never under 30. Local reads (machine, owner steps, mailbox, config) run every 10 s. |
 | `staleMinutes` | `30` | A dispatched worker whose terminal is quiet longer than this is stale. |
-| `coordinators` | `[]` | `{ name, parent?, terminal?, run?, model?, worktrees? }`. `parent` names a parent coordinator for Tasks grouping; `terminal` is the Orca terminal handle; `run` is the orchestration Run that holds its tasks; `worktrees` is a list of path prefixes whose agent terminals count as its workers. |
+| `coordinators` | `[]` | `{ name, parent?, terminal?, run?, model?, sessionFile?, worktrees? }`. `parent` names a parent coordinator for Tasks grouping; `terminal` is the Orca terminal handle; `run` is the orchestration Run that holds its tasks; `sessionFile` identifies the coordinator cwd folder and a session filename hint; the newest session in that folder supplies only its newest permissionMode; `worktrees` is a list of path prefixes whose agent terminals count as its workers. |
 | `workersCommand` | `orca orchestration task-list --run {run} --status dispatched --brief --json` | Argv that lists a coordinator's live tasks; `{run}` is replaced. A worker that leaves this list shows as done for an hour. Output over 4 MiB is refused, so keep the filter. |
 | `terminalsCommand` | `orca terminal list --json` | Argv that lists terminals with `lastOutputAt`. The output preview is used only to detect a waiting prompt and is never shown or stored. |
 | `screenCommand` | `orca terminal read --terminal {handle} --screen --json` | Argv that reads the rendered screen of a shown terminal, once per remote poll, to detect a permission dialog (`Do you want to proceed?`, `Esc to cancel`, `Allow command?`, trust prompts) in its last 20 rows (`Allow command?`, or two of the other markers). Only the match leaves the reader; the screen is never shown or stored. |

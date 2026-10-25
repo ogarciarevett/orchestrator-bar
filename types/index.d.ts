@@ -3,6 +3,8 @@ export type Coordinator = {
   terminal?: string
   run?: string
   model?: string
+  // Session JSONL hint; newest session in its folder supplies only permissionMode.
+  sessionFile?: string
   // Name of the parent coordinator, for nested task groups.
   parent?: string
   // Path prefixes: agent terminals under them show as this coordinator's workers.
@@ -44,6 +46,7 @@ export type WorkerRow = {
   pr?: string
   // The terminal it runs in, so one worker is never listed twice; not drawn.
   handle?: string
+  model?: string
   worktreePath?: string
   // When a dispatched worker left the list; it shows as done for an hour.
   doneAt?: number
@@ -56,11 +59,13 @@ export type CoordinatorRow = {
   quietMinutes?: number
   workers: WorkerRow[]
   taskWorkers?: WorkerRow[]
+  ownTask?: WorkerRow
+  reports?: TaskStatus[]
   isWaitingPermission?: boolean
 }
 
 export type TaskStatus = { task: string; pr: string; state: string; left: string; eta_utc: string; updated: string }
-export type TaskRow = TaskStatus & { key: string; stale: boolean; fallback: boolean }
+export type TaskRow = TaskStatus & { key: string; terminal: string; coordinator: string; model: string; stale: boolean; fallback: boolean }
 export type TaskGroup = { coordinator: string; rows: TaskRow[] }
 
 export type EnvRow = { name: string; ready: string; state: string; checkedAt: number }
@@ -75,6 +80,7 @@ export type Section<T> = { value?: T; at: number; error?: string }
 export type Snapshot = {
   config?: Section<Config>
   coordinators?: Section<CoordinatorRow[]>
+  modes?: Section<Record<string, string>>
   tasks?: Section<TaskGroup[]>
   environments?: Section<EnvRow[]>
   prs?: Section<RepoRow[]>

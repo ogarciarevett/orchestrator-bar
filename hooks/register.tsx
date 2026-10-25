@@ -4,13 +4,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
+import { permissionModeCommand } from './permission-mode'
+
 import type { Config, Section, Snapshot, TaskStatus, WorkerRow } from '../types'
 import {
   carryDone,
   MACHINE_TTL_MS,
   parseTaskStatus,
   taskGroups,
-  taskIsStale,
+  taskValue,
+  parseCoordinatorReports,
+  taskTitle,
+  madridTime,
   expandHome,
   cachedMachine,
   isConfiguredSession,
@@ -89,6 +94,14 @@ async function readConfig($: $, path: string) {
 async function readRemote($: $, c: Config) {
   const now = () => Date.now()
   await Promise.all([
+    refresh($, 'modes', async () => {
+      const home = (await $.env.get('HOME')) ?? ''
+      const sessions = c.coordinators.map(co => co.sessionFile ? expandHome(co.sessionFile, home) : '')
+      const directory = (path: string) => path.slice(0, path.lastIndexOf('/'))
+      // Shared cwd folders need exact hints, otherwise one coordinator could borrow another's mode.
+      const values = await Promise.all(sessions.map(path => path ? run($, permissionModeCommand(path, sessions.filter(other => directory(other) === directory(path)).length === 1)).then(value => ['bypass', 'auto', 'manual', 'plan'].includes(value.trim()) ? value.trim() : 'no report yet', () => 'no report yet') : 'no report yet'))
+      return Object.fromEntries(c.coordinators.map((co, i) => [co.name, values[i]!]))
+    }),
     refresh($, 'coordinators', async () => {
       const terminalsOut = await run($, c.terminalsCommand)
       const terminals = parseTerminals(terminalsOut)
@@ -115,20 +128,21 @@ async function readRemote($: $, c: Config) {
       })
       // One screen read per shown terminal; a read that fails counts as no dialog.
       const blocked = new Set<string>()
+      const screens = new Map<string, string>()
       await Promise.all(
         [...seen].map(h =>
           run($, c.screenCommand.map(a => a.replace('{handle}', h))).then(
-            out => void (isPermissionPrompt(out) && blocked.add(h)),
+            out => { screens.set(h, out); if (isPermissionPrompt(out)) blocked.add(h) },
             () => {},
           ),
         ),
       )
       const result = c.coordinators.map((co, i) => {
         const live = [...dispatched[i]!, ...mine[i]!]
-          .map(w => ({ ...w, worktreePath: w.worktreePath ?? paths.get(w.handle ?? ''), ...(w.handle && blocked.has(w.handle) ? { state: 'permission' as const } : {}) }))
+          .map(w => ({ ...w, worktreePath: w.worktreePath ?? paths.get(w.handle ?? ''), model: inventory.find((t: any) => t.handle === w.handle)?.model ?? w.model, ...(w.handle && blocked.has(w.handle) ? { state: 'permission' as const } : {}) }))
           .sort((a, b) => ORDER[a.state] - ORDER[b.state])
         const workers = mergeWorkers(carryDone(prev.find(p => p.name === co.name)?.workers ?? [], live, now()))
-        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live }
+        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live, ownTask: co.terminal ? { name: co.name, handle: co.terminal, state: 'running' as const, worktreePath: paths.get(co.terminal), model: co.model } : undefined, reports: parseCoordinatorReports(screens.get(co.terminal ?? '') ?? '') }
       })
       return result
     }),
@@ -155,7 +169,7 @@ async function readRemote($: $, c: Config) {
 const taskFiles = new Map<string, { at: number; status: Promise<TaskStatus | undefined> }>()
 async function readTasks($: $, c: Config) {
   const coords = (await read($, snapshot)).coordinators?.value ?? []
-  const paths = new Set(coords.flatMap(co => (co.taskWorkers ?? co.workers).filter(w => w.state !== 'done' && w.state !== 'failed').map(w => w.worktreePath).filter((p): p is string => !!p && p.startsWith('/'))))
+  const paths = new Set(coords.flatMap(co => [...(co.taskWorkers ?? co.workers), ...(co.ownTask ? [co.ownTask] : [])].filter(w => w.state !== 'done' && w.state !== 'failed').map(w => w.worktreePath).filter((p): p is string => !!p && p.startsWith('/'))))
   for (const path of taskFiles.keys()) if (!paths.has(path)) taskFiles.delete(path)
   const files = await Promise.all([...paths].map(async path => {
     let cached = taskFiles.get(path)
@@ -189,14 +203,6 @@ async function readLocal($: $, c: Config) {
     c.ownerSteps ? refresh($, 'steps', async () => parseSteps(await $.fs.read(c.ownerSteps))) : undefined,
     c.mailbox ? refresh($, 'mail', async () => parseMail(await run($, ['/usr/bin/tail', '-n', '5', c.mailbox]), names)) : undefined,
   ])
-}
-
-const taskTable = (values: string[], width: number) => {
-  const widths = width >= 60 ? [Math.max(4, width - 46), 6, 8, 12, 7, 6] : [Math.max(4, width - 36), 4, 6, 8, 6, 5]
-  return values.map((v, i) => {
-    const n = widths[i]!
-    return (v.length > n ? v.slice(0, n - 1) + '…' : v).padEnd(n)
-  }).join(' ')
 }
 
 const ago = (ms: number) => {
@@ -303,9 +309,9 @@ export const register: Register = (on, options) => {
               <Text weight="bold">{title}</Text>
               {extra ?? ''}
             </Button>,
-            <Text dimColor tabular>{!sec ? 'waiting' : sec.at ? ago(sec.at) : 'never read'}</Text>,
+            <Text dimColor tabular>{sec?.at ? ago(sec.at) : 'no report yet'}</Text>,
           )}
-          {sec?.error ? row(<Text color="warning" wrap="truncate-end">⚠ stale: {mask(sec.error)}</Text>, undefined, 2) : ''}
+          {sec?.error ? row(<Text color="warning" wrap="truncate-end">⚠ {id === 'tasks' ? 'Last report unavailable: ' : 'stale: '}{mask(sec.error)}</Text>, undefined, 2) : ''}
           {isOpen ? body() : ''}
         </Box>
       )
@@ -354,11 +360,17 @@ export const register: Register = (on, options) => {
             {permission ? <Text color="error" weight="bold">■ {permission} permission  </Text> : ''}
             {needYou ? <Text color="error" weight="bold">◐ {needYou} need you  </Text> : ''}
             {permission || needYou || stale || down ? '' : <Text color="success">● all clear</Text>}
-            {stale ? <Text color="warning">◌ {stale} stale  </Text> : ''}
+            {stale ? <Text color="warning">{stale} without recent output  </Text> : ''}
             {down ? <Text color="error">▼ {down} env down</Text> : ''}
           </Text>,
           <Button key="refresh" plain hotkey="r" label="↻ refresh" onPress={() => { lastRemote = 0; void tick($).catch(() => {}) }} />,
         )}
+        <Box flexDirection="column">
+          {cfg.coordinators.map(co => {
+            const mode = s.modes?.error ? 'no report yet' : s.modes?.value?.[co.name] ?? 'no report yet'
+            return <Text color={mode === 'bypass' ? 'success' : 'error'} wrap="wrap">{mask(co.name)}: {mode}</Text>
+          })}
+        </Box>
         {section('coordinators', '◆', 'Coordinators', s.coordinators, () =>
           coords.map(c => {
             // Done rows fold into one count line; the rest show one row each.
@@ -389,16 +401,25 @@ export const register: Register = (on, options) => {
           (s.tasks?.value ?? []).length ? (s.tasks?.value ?? []).map(group => (
             <Box flexDirection="column">
               <Text weight="bold" wrap="truncate-end">{mask(group.coordinator)}</Text>
-              <Text dimColor mono>{taskTable(['Task', 'PR', 'State', 'Left', 'ETA UTC', 'Updated'], w)}</Text>
+              {row(<Text dimColor>Task</Text>, <Text dimColor>ETA Madrid</Text>)}
               {group.rows.map(task => {
-                const stale = taskIsStale(task.updated, Date.now())
-                const stamp = (v: string) => v ? v.slice(11, 16) : '?'
-                const fullText = `${task.task} | PR ${task.pr || '—'} | ${task.state}${stale ? ' (stale)' : ''} | Left: ${task.left || '—'} | ETA UTC: ${task.eta_utc || '?'} | Updated UTC: ${task.updated || '?'}${task.fallback ? ' (title only)' : ''}`
                 const isFull = full.includes(`task-${task.key}`)
-                return row(
-                  <Button key={`expand-task-${task.key}`} plain onPress={() => update($, expanded, list => isFull ? list.filter(x => x !== `task-${task.key}`) : [...list, `task-${task.key}`])}>
-                    <Text mono color={stale ? 'warning' : undefined} wrap={isFull ? 'wrap' : 'truncate-end'}>{mask(isFull ? fullText : taskTable([task.task, task.pr || '—', stale ? 'stale' : task.state, task.left || '—', stamp(task.eta_utc), stamp(task.updated)], w))}</Text>
-                  </Button>, undefined, 2,
+                const prUrl = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(task.pr) ? task.pr : undefined
+                return (
+                  <Box flexDirection="column">
+                    <Button key={`expand-task-${task.key}`} plain onPress={() => update($, expanded, list => isFull ? list.filter(x => x !== `task-${task.key}`) : [...list, `task-${task.key}`])}>
+                      <Text mono>{taskTitle(task.task, w - 14).padEnd(w - 14)} {madridTime(task.eta_utc)}</Text>
+                    </Button>
+                    {isFull ? <Box flexDirection="column" paddingLeft={2}>
+                      <Text wrap="wrap">{taskValue(task.task)}</Text>
+                      <Text wrap="wrap">PR: {prUrl ? <Link href={prUrl}>{task.pr}</Link> : taskValue(task.pr)} | State: {taskValue(task.state)}</Text>
+                      <Text wrap="wrap">Left: {taskValue(task.left)}</Text>
+                      <Text wrap="wrap">Last update (Madrid): {madridTime(task.updated)}</Text>
+                      <Text wrap="wrap">Terminal: {taskValue(task.terminal)}</Text>
+                      <Text wrap="wrap">Coordinator: {taskValue(task.coordinator)}</Text>
+                      <Text wrap="wrap">Model: {taskValue(task.model)}</Text>
+                    </Box> : ''}
+                  </Box>
                 )
               })}
             </Box>
@@ -547,7 +568,7 @@ export const register: Register = (on, options) => {
         <Text>● {workers.filter(x => x.state !== 'done' && x.state !== 'failed').length} workers  </Text>
         {permission ? <Text color="error" weight="bold">■ {permission} permission  </Text> : ''}
         {input ? <Text color="error" weight="bold">◐ {input} need you  </Text> : ''}
-        {stale ? <Text color="warning">◌ {stale} stale  </Text> : ''}
+        {stale ? <Text color="warning">{stale} without recent output  </Text> : ''}
         <Text color={down ? 'error' : 'success'}>{down ? '▼' : '▲'} envs {envs.length - down}/{envs.length}  </Text>
         <Text>◇ {prs} PRs  </Text>
         {m ? <Text color={machineLevel(m, s.config.value.limits)}>▣ load {m.load.toFixed(0)}/{m.cores} mem {m.memoryPercent}% swap {m.swapUsedGB.toFixed(1)}G  </Text> : ''}
