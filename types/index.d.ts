@@ -3,6 +3,8 @@ export type Coordinator = {
   terminal?: string
   run?: string
   model?: string
+  // Session JSONL hint; newest session in its folder supplies only permissionMode.
+  sessionFile?: string
   // Name of the parent coordinator, for nested task groups.
   parent?: string
   // Path prefixes: agent terminals under them show as this coordinator's workers.

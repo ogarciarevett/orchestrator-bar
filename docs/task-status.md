@@ -49,15 +49,24 @@ Only those lines are retained; arbitrary terminal output is not displayed.
 Their ETA and update time stay unreported unless supplied by a task status file.
 There is no BENCH parser.
 
-Each configured coordinator, including entries with `parent`, shows a run-mode
-line at the top of the panel, always visible even when Coordinators is collapsed,
-read from the bottom of its terminal screen. Recognized status labels are
-`bypass`, `auto`, `plan`, and `manual`. Bypass is green; every other value,
-including `no report yet`, is red. Role documents describe expected modes;
-they never establish the mode actually running. Keep configured terminal handles
-current after a restart. No session transcript content is collected.
+Each configured coordinator, including entries with `parent`, has a mode line
+at the top even when Coordinators is collapsed or collection has not succeeded.
+Set its `sessionFile` to a session JSONL path in that coordinator's cwd folder.
+The filename is a hint: the reader selects the most recently modified top-level
+`*.jsonl` in that same folder on every poll, so a restart selects the new session.
+If two configured coordinators share a folder, their exact filename hints are
+used to avoid confusing their sessions; update those hints after a restart.
+A small read-only subprocess scans its complete records backward and returns only the newest
+`permissionMode`, normalized to `bypass`, `auto`, `plan`, or `manual`. It returns
+no transcript text or other session fields. Unknown modes, missing paths and
+failed reads say `no report yet`; every value other than bypass is red.
+Terminal footer labels and role documents never establish the running mode.
+Update the `sessionFile` folder if the coordinator changes cwd, and keep terminal
+handles current.
 
 Only the configured session reads files. It uses the existing 10-second local
 timer and 15-second cache TTL (one read per distinct active worktree per TTL),
 plus the existing remote inventory poll (60 seconds by default, minimum 30).
-There are no new processes, per-worker timers, screen reads, or remote polls.
+Mode collection adds one field-only subprocess per configured session per remote
+poll. It uses the existing screen reads for coordinator task report lines.
+There are no per-worker timers or additional remote polls.

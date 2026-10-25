@@ -35,7 +35,7 @@ export function parseConfig(text: string): Config {
   for (const k of ['workersCommand', 'terminalsCommand', 'screenCommand', 'repos', 'usageCommand', 'usageProviders'] as const) {
     if (!isStrings(c[k])) throw new Error(`${k} must be a list of strings`)
   }
-  if (!Array.isArray(c.coordinators) || !c.coordinators.every(x => typeof x?.name === 'string' && (x.worktrees === undefined || isStrings(x.worktrees)))) {
+  if (!Array.isArray(c.coordinators) || !c.coordinators.every(x => typeof x?.name === 'string' && (x.worktrees === undefined || isStrings(x.worktrees)) && (x.sessionFile === undefined || typeof x.sessionFile === 'string'))) {
     throw new Error('coordinators must be a list of { name, worktrees? }')
   }
   const names = c.coordinators.map(co => co.name)
@@ -143,21 +143,6 @@ export function parseTerminalWorkers(stdout: string, worktrees: string[], skip: 
       const state = waiting.get(t.handle)?.isWaiting ? 'input' : quiet === undefined || quiet > staleMinutes ? 'stale' : 'running'
       return { name, state, quietMinutes: quiet, pr: name.match(PR)?.[1], handle: t.handle, worktreePath: t.worktreePath } as WorkerRow
     })
-}
-
-// Only explicit status-line labels count; prose mentioning a mode is not evidence.
-export function parseRunMode(stdout: string): string {
-  try {
-    const tail = JSON.parse(stdout)?.result?.terminal?.tail
-    if (!Array.isArray(tail)) return 'no report yet'
-    for (const line of tail.slice(-12).reverse()) {
-      const mode = String(line).match(/(?:^|\s)(?:⏵⏵|⏸|»)\s*(bypass|auto|manual|plan)\b/)?.[1]
-      if (mode) return mode
-      const plain = String(line).match(/^\s*(bypass permissions on|auto mode on|plan mode on|manual mode(?: on)?)\s*$/)?.[1]
-      if (plain) return plain.split(' ')[0]!
-    }
-  } catch {}
-  return 'no report yet'
 }
 
 export function parseCoordinatorReports(stdout: string): TaskStatus[] {

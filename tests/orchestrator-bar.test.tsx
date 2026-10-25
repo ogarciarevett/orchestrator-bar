@@ -8,7 +8,6 @@ import {
   taskTitle,
   taskValue,
   madridTime,
-  parseRunMode,
   parseCoordinatorReports,
   carryDone,
   isConfiguredSession,
@@ -250,7 +249,7 @@ test('mailbox: last 5, newest first, names mapped, body never kept', () => {
 })
 
 // Stands for the engine beneath the mod: every read answers from fixtures.
-function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object } = {}) {
+function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca?: boolean; htmlStatus?: boolean; garbageOrca?: boolean; config?: object; status?: object; legacy?: boolean; concurrentConfig?: object; permissionMode?: string } = {}) {
   const runs: string[][] = []
   const calls: string[] = []
   // The shared machine cache: missing until the plugin writes it.
@@ -294,7 +293,8 @@ function engine(on: any, opts: { failEnv?: boolean; isPlaced?: boolean; failOrca
     const a = e.argv.join(' ')
     if (opts.garbageOrca && a.startsWith('orca')) return { value: { exitCode: 0, stdout: 'token=abc123 not json', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (opts.failOrca && a.startsWith('orca')) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    const stdout = a.includes('terminal read')
+    const stdout = e.argv[0] === 'python3' ? (opts.permissionMode ?? 'no report yet')
+      : a.includes('terminal read')
       ? screen(...(['term_t1', 'term_alpha'].includes(e.argv[4]) ? ['Do you want to proceed?', '❯ 1. Yes', 'Esc to cancel'] : ['SECRET=hunter2', '> ']))
       : a.includes('terminal list')
       ? terminalsAt(Date.now())
@@ -387,7 +387,7 @@ test('a section whose first read fails says so instead of waiting', async ($, on
   engine(on, { failOrca: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /never read/ }))?.text).toBe('never read')
+  expect((await ui.find({ type: 'Text', text: /^no report yet$/ }))?.text).toBe('no report yet')
   expect((await ui.find({ type: 'Text', text: /stale:/ }))?.text).toMatch(/⚠ stale: orca exited 1/)
   // The other sections still draw.
   expect((await ui.find({ type: 'Text', text: /^normal$/ }))?.text).toBe('normal')
@@ -545,13 +545,6 @@ test('task summaries remove glyphs, keep word boundaries and format Madrid winte
   expect(madridTime('')).toBe('no report yet')
 })
 
-test('run modes come from status lines, never from prose describing a mode', () => {
-  for (const [line, mode] of [['⏵⏵ bypass permissions on', 'bypass'], ['⏵⏵ auto mode on', 'auto'], ['⏸ plan mode on', 'plan'], ['manual mode', 'manual'], ['Please switch to bypass', 'no report yet']]) {
-    expect(parseRunMode(screen(line))).toBe(mode)
-  }
-  expect(parseRunMode('broken')).toBe('no report yet')
-})
-
 test('coordinator reports accept explicit report lines and discard unrelated screen text', () => {
   const rows = parseCoordinatorReports(screen('SECRET=hunter2', 'Missing and why: GPU results: queue running.', 'Waiting (drafts, named blockers): hyperag #6 (owner token).', 'Missing and why: Paper pass: review running.'))
   expect(rows.map(r => r.left)).toEqual(['Paper pass: review running.', 'hyperag #6 (owner token).'])
@@ -596,3 +589,26 @@ test('run-mode lines stay visible when Coordinators is collapsed', async ($, on)
   expect(await ui.find({ type: 'Text', text: /◌ 1 stale/ })).toBe(undefined)
   await ui.unmount()
 })
+
+
+test('configured coordinator mode remains visible when the first collection fails', async ($, on) => {
+  engine(on, { failOrca: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /^(waiting|never read)$/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /^no report yet$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+
+for (const mode of ['bypass', 'plan']) {
+  test(`session mode ${mode} comes from the field-only reader`, async ($, on) => {
+    const runs = engine(on, { permissionMode: mode, config: { ...CONFIG, coordinators: [{ ...CONFIG.coordinators[0], sessionFile: '/sessions/sample.jsonl' }] } })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^Alpha: ${mode}$`) }))?.props.color).toBe(mode === 'bypass' ? 'success' : 'error')
+    expect(runs.some(argv => argv[0] === 'python3' && argv[3] === '/sessions/sample.jsonl')).toBe(true)
+    await ui.unmount()
+  })
+}

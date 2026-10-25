@@ -4,6 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
+import { permissionModeCommand } from './permission-mode'
+
 import type { Config, Section, Snapshot, TaskStatus, WorkerRow } from '../types'
 import {
   carryDone,
@@ -11,7 +13,6 @@ import {
   parseTaskStatus,
   taskGroups,
   taskValue,
-  parseRunMode,
   parseCoordinatorReports,
   taskTitle,
   madridTime,
@@ -94,6 +95,11 @@ async function readRemote($: $, c: Config) {
   const now = () => Date.now()
   await Promise.all([
     refresh($, 'coordinators', async () => {
+      const home = (await $.env.get('HOME')) ?? ''
+      const sessions = c.coordinators.map(co => co.sessionFile ? expandHome(co.sessionFile, home) : '')
+      const directory = (path: string) => path.slice(0, path.lastIndexOf('/'))
+      // Shared cwd folders need exact hints, otherwise one coordinator could borrow another's mode.
+      const modes = await Promise.all(sessions.map(path => path ? run($, permissionModeCommand(path, sessions.filter(other => directory(other) === directory(path)).length === 1)).then(value => ['bypass', 'auto', 'manual', 'plan'].includes(value.trim()) ? value.trim() : 'no report yet', () => 'no report yet') : 'no report yet'))
       const terminalsOut = await run($, c.terminalsCommand)
       const terminals = parseTerminals(terminalsOut)
       const prev = (await read($, snapshot)).coordinators?.value ?? []
@@ -133,7 +139,7 @@ async function readRemote($: $, c: Config) {
           .map(w => ({ ...w, worktreePath: w.worktreePath ?? paths.get(w.handle ?? ''), model: inventory.find((t: any) => t.handle === w.handle)?.model ?? w.model, ...(w.handle && blocked.has(w.handle) ? { state: 'permission' as const } : {}) }))
           .sort((a, b) => ORDER[a.state] - ORDER[b.state])
         const workers = mergeWorkers(carryDone(prev.find(p => p.name === co.name)?.workers ?? [], live, now()))
-        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live, ownTask: co.terminal ? { name: co.name, handle: co.terminal, state: 'running' as const, worktreePath: paths.get(co.terminal), model: co.model } : undefined, runMode: parseRunMode(screens.get(co.terminal ?? '') ?? ''), reports: parseCoordinatorReports(screens.get(co.terminal ?? '') ?? '') }
+        return { ...coordinatorRow(co, workers, terminals, now(), !!co.terminal && blocked.has(co.terminal)), taskWorkers: live, ownTask: co.terminal ? { name: co.name, handle: co.terminal, state: 'running' as const, worktreePath: paths.get(co.terminal), model: co.model } : undefined, runMode: modes[i], reports: parseCoordinatorReports(screens.get(co.terminal ?? '') ?? '') }
       })
       return result
     }),
@@ -300,7 +306,7 @@ export const register: Register = (on, options) => {
               <Text weight="bold">{title}</Text>
               {extra ?? ''}
             </Button>,
-            <Text dimColor tabular>{!sec ? 'waiting' : sec.at ? ago(sec.at) : 'never read'}</Text>,
+            <Text dimColor tabular>{sec?.at ? ago(sec.at) : 'no report yet'}</Text>,
           )}
           {sec?.error ? row(<Text color="warning" wrap="truncate-end">⚠ {id === 'tasks' ? 'Last report unavailable: ' : 'stale: '}{mask(sec.error)}</Text>, undefined, 2) : ''}
           {isOpen ? body() : ''}
@@ -357,7 +363,10 @@ export const register: Register = (on, options) => {
           <Button key="refresh" plain hotkey="r" label="↻ refresh" onPress={() => { lastRemote = 0; void tick($).catch(() => {}) }} />,
         )}
         <Box flexDirection="column">
-          {coords.map(c => <Text color={c.runMode === 'bypass' ? 'success' : 'error'} wrap="wrap">{mask(c.name)}: {c.runMode ?? 'no report yet'}</Text>)}
+          {cfg.coordinators.map(co => {
+            const mode = coords.find(c => c.name === co.name)?.runMode ?? 'no report yet'
+            return <Text color={mode === 'bypass' ? 'success' : 'error'} wrap="wrap">{mask(co.name)}: {mode}</Text>
+          })}
         </Box>
         {section('coordinators', '◆', 'Coordinators', s.coordinators, () =>
           coords.map(c => {

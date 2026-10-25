@@ -15,3 +15,4 @@ jobs:
       - run: python3 -m json.tool config.example.json > /dev/null
       - run: claude plugin validate .
       - run: claude plugin test .
+      - run: python3 -m unittest discover -s tests -p "*_test.py"

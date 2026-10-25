@@ -4,7 +4,7 @@
 
 - Tasks shows a short title and Madrid ETA; clicking opens reported details and PR links.
 - Missing reports use plain language; terminal spinners and freshness labels no longer fill task rows.
-- Coordinator status reports supply task rows; every coordinator shows its observed run mode, with non-bypass modes in red.
+- Coordinator status reports supply task rows; every coordinator shows the newest session permissionMode at the top, with non-bypass modes in red.
 
 ## 0.3.0
 
