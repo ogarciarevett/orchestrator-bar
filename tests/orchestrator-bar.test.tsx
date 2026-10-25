@@ -428,7 +428,7 @@ test('the band sums it up while the pane is closed', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const band = await $.ui.mount({ plugin: 'orchestrator-bar', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 160 } } as any)
   const text = (await band.find({ type: 'Text', text: /◆ orchestrator-bar/ }))?.text ?? ''
-  expect(text).toMatch(/● 4 workers  ■ 2 permission  ◐ 1 need you  ◌ 1 stale  ▲ envs 1\/1  ◇ 1 PRs  ▣ load 11\/18 mem 52% swap 5\.8G/)
+  expect(text).toMatch(/● 4 workers  ■ 2 permission  ◐ 1 need you  1 without recent output  ▲ envs 1\/1  ◇ 1 PRs  ▣ load 11\/18 mem 52% swap 5\.8G/)
   await band.unmount()
 })
 
@@ -572,7 +572,7 @@ for (const width of [24, 44, 90]) {
     expect((await ui.find({ type: 'Link', text: /pull\/12/ }))?.props.href).toBe('https://github.com/example-org/web/pull/12')
     await ui.press({ key: 'expand-task-term_t1' })
     expect(await ui.find({ type: 'Text', text: /^Left:/ })).toBe(undefined)
-    expect((await ui.find({ type: 'Text', text: /^Run mode:/ }))?.props.color).toBe('error')
+    expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
     await ui.unmount()
   })
 }
@@ -583,4 +583,16 @@ test('a sub-coordinator keeps its own status row when its terminal is excluded f
   expect(groups[0]?.coordinator).toBe('Root / Sub')
   expect(groups[0]?.rows[0]?.terminal).toBe('term_sub')
   expect(groups[0]?.rows[0]?.task).toBe('Fix login')
+})
+
+
+test('run-mode lines stay visible when Coordinators is collapsed', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-coordinators' })
+  expect((await ui.find({ type: 'Text', text: /^Alpha: no report yet$/ }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /1 without recent output/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /◌ 1 stale/ })).toBe(undefined)
+  await ui.unmount()
 })

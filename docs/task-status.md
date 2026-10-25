@@ -50,7 +50,8 @@ Their ETA and update time stay unreported unless supplied by a task status file.
 There is no BENCH parser.
 
 Each configured coordinator, including entries with `parent`, shows a run-mode
-line read from the bottom of its terminal screen. Recognized status labels are
+line at the top of the panel, always visible even when Coordinators is collapsed,
+read from the bottom of its terminal screen. Recognized status labels are
 `bypass`, `auto`, `plan`, and `manual`. Bypass is green; every other value,
 including `no report yet`, is red. Role documents describe expected modes;
 they never establish the mode actually running. Keep configured terminal handles

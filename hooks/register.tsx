@@ -351,11 +351,14 @@ export const register: Register = (on, options) => {
             {permission ? <Text color="error" weight="bold">■ {permission} permission  </Text> : ''}
             {needYou ? <Text color="error" weight="bold">◐ {needYou} need you  </Text> : ''}
             {permission || needYou || stale || down ? '' : <Text color="success">● all clear</Text>}
-            {stale ? <Text color="warning">◌ {stale} stale  </Text> : ''}
+            {stale ? <Text color="warning">{stale} without recent output  </Text> : ''}
             {down ? <Text color="error">▼ {down} env down</Text> : ''}
           </Text>,
           <Button key="refresh" plain hotkey="r" label="↻ refresh" onPress={() => { lastRemote = 0; void tick($).catch(() => {}) }} />,
         )}
+        <Box flexDirection="column">
+          {coords.map(c => <Text color={c.runMode === 'bypass' ? 'success' : 'error'} wrap="wrap">{mask(c.name)}: {c.runMode ?? 'no report yet'}</Text>)}
+        </Box>
         {section('coordinators', '◆', 'Coordinators', s.coordinators, () =>
           coords.map(c => {
             // Done rows fold into one count line; the rest show one row each.
@@ -374,7 +377,6 @@ export const register: Register = (on, options) => {
                     )}
                   </Text>,
                 )}
-                {row(<Text color={c.runMode === 'bypass' ? 'success' : 'error'}>Run mode: {c.runMode ?? 'no report yet'}</Text>, undefined, 2)}
                 {active.map(worker)}
                 {done ? row(<Text color="subtle" dimColor>✓ +{done} done</Text>, undefined, 2) : ''}
                 {c.workers.length ? '' : row(<Text dimColor>no active workers</Text>, undefined, 2)}
@@ -554,7 +556,7 @@ export const register: Register = (on, options) => {
         <Text>● {workers.filter(x => x.state !== 'done' && x.state !== 'failed').length} workers  </Text>
         {permission ? <Text color="error" weight="bold">■ {permission} permission  </Text> : ''}
         {input ? <Text color="error" weight="bold">◐ {input} need you  </Text> : ''}
-        {stale ? <Text color="warning">◌ {stale} stale  </Text> : ''}
+        {stale ? <Text color="warning">{stale} without recent output  </Text> : ''}
         <Text color={down ? 'error' : 'success'}>{down ? '▼' : '▲'} envs {envs.length - down}/{envs.length}  </Text>
         <Text>◇ {prs} PRs  </Text>
         {m ? <Text color={machineLevel(m, s.config.value.limits)}>▣ load {m.load.toFixed(0)}/{m.cores} mem {m.memoryPercent}% swap {m.swapUsedGB.toFixed(1)}G  </Text> : ''}

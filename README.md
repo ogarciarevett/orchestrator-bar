@@ -85,7 +85,8 @@ migration, only the new path is read. Restart the configured session after updat
    shows once, with its newest state; done workers fold into one `+N done` line.
    A coordinator or worker whose screen shows a permission dialog is red and
    listed first. Input rows are red, stale rows are yellow. Each coordinator also
-   shows its observed run mode; every mode other than bypass is red.
+   shows its observed run mode at the top, even when the section is collapsed;
+   every mode other than bypass is red.
 2. **Tasks**: short task title and ETA in Madrid time, grouped by coordinator and
    sub-coordinator. Click to open the full report: PR link, state, remaining work,
    last update, terminal ID, coordinator and model. Workers write
