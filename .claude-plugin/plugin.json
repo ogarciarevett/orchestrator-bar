@@ -1,6 +1,6 @@
 {
   "name": "orchestrator-bar",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A read-only orchestrator bar for coordinator and worker tasks, environments, pull requests, usage and machine load.",
   "author": {
     "name": "ogarciarevett",

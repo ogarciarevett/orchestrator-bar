@@ -84,12 +84,14 @@ migration, only the new path is read. Restart the configured session after updat
    every agent terminal under its `worktrees` (title and state only). A worker name
    shows once, with its newest state; done workers fold into one `+N done` line.
    A coordinator or worker whose screen shows a permission dialog is red and
-   listed first. Input rows are red, stale rows are yellow.
-2. **Tasks**: one row per active worker, grouped by coordinator and sub-coordinator,
-   with task, PR, state, what is left, ETA (UTC), and last update. Workers write
-   `.orca/task-status.json` in their worktree; missing files fall back to terminal
-   titles, with unknown progress and ETA. Updates at least 20 minutes old are
-   flagged stale. See [the format and example](docs/task-status.md).
+   listed first. Input rows are red, stale rows are yellow. Each coordinator also
+   shows its observed run mode; every mode other than bypass is red.
+2. **Tasks**: short task title and ETA in Madrid time, grouped by coordinator and
+   sub-coordinator. Click to open the full report: PR link, state, remaining work,
+   last update, terminal ID, coordinator and model. Workers write
+   `.orca/task-status.json`; terminal titles and explicit coordinator reports
+   supply fallback rows. Missing values say `no report yet`.
+   See [the format and example](docs/task-status.md).
 3. **Environments**: per environment, the HTTP code of `/ready`, the state field of
    the status endpoint, and the time of the last check.
 4. **Open PRs** per repo: count and numbers; a PR older than 24 hours is yellow.

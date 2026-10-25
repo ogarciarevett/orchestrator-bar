@@ -5,6 +5,11 @@ import {
   parseTaskStatus,
   taskGroups,
   taskIsStale,
+  taskTitle,
+  taskValue,
+  madridTime,
+  parseRunMode,
+  parseCoordinatorReports,
   carryDone,
   isConfiguredSession,
   MACHINE_TTL_MS,
@@ -475,8 +480,8 @@ test('tasks: parent before sub-coordinator, one row per handle, status or title 
   const groups = taskGroups(config, coords, new Map([['/w/task', STATUS]]), NOW)
   expect(groups.map(g => g.coordinator)).toEqual(['Root', 'Root / Child'])
   expect(groups[0]?.rows.length).toBe(2)
-  expect(groups[0]?.rows[0]).toEqual({ ...STATUS, key: 'one', stale: false, fallback: false })
-  expect(groups[1]?.rows[0]).toEqual({ task: 'Review PR #9', pr: '#9', state: 'input', left: 'unknown', eta_utc: '', updated: '', key: 'two', stale: true, fallback: true })
+  expect(groups[0]?.rows[0]).toEqual({ ...STATUS, terminal: 'one', coordinator: 'Root', model: '', key: 'one', stale: false, fallback: false })
+  expect(groups[1]?.rows[0]).toEqual({ task: 'Review PR #9', pr: '#9', state: 'input', left: '', eta_utc: '', updated: '', terminal: 'two', coordinator: 'Root / Child', model: '', key: 'two', stale: true, fallback: true })
   for (const coordinators of [[{ name: 'A', parent: 'B' }], [{ name: 'A', parent: 'A' }], [{ name: 'A', parent: 'B' }, { name: 'B', parent: 'A' }], [{ name: 'A' }, { name: 'A' }]]) {
     expect(() => parseConfig(JSON.stringify({ coordinators }))).toThrow()
   }
@@ -528,4 +533,54 @@ test('config migration: invalid legacy data never enables collectors or writes c
   expect(runs.migration().text).toBe('')
   expect(runs.migration().legacyReads).toBe(1)
   expect([...runs]).toEqual([])
+})
+
+
+test('task summaries remove glyphs, keep word boundaries and format Madrid winter and summer', () => {
+  expect(taskTitle('⠴ Fix login redirects | workspace', 12)).toBe('Fix login…')
+  expect(taskTitle('x'.repeat(100), 10)).toBe('Task')
+  for (const value of ['', '?', 'unknown', 'stale']) expect(taskValue(value)).toBe('no report yet')
+  expect(madridTime('2026-01-01T12:00:00Z')).toBe('01/01 13:00')
+  expect(madridTime('2026-07-01T23:00:00Z')).toBe('02/07 01:00')
+  expect(madridTime('')).toBe('no report yet')
+})
+
+test('run modes come from status lines, never from prose describing a mode', () => {
+  for (const [line, mode] of [['⏵⏵ bypass permissions on', 'bypass'], ['⏵⏵ auto mode on', 'auto'], ['⏸ plan mode on', 'plan'], ['manual mode', 'manual'], ['Please switch to bypass', 'no report yet']]) {
+    expect(parseRunMode(screen(line))).toBe(mode)
+  }
+  expect(parseRunMode('broken')).toBe('no report yet')
+})
+
+test('coordinator reports accept explicit report lines and discard unrelated screen text', () => {
+  const rows = parseCoordinatorReports(screen('SECRET=hunter2', 'Missing and why: GPU results: queue running.', 'Waiting (drafts, named blockers): hyperag #6 (owner token).', 'Missing and why: Paper pass: review running.'))
+  expect(rows.map(r => r.left)).toEqual(['Paper pass: review running.', 'hyperag #6 (owner token).'])
+  expect(JSON.stringify(rows)).not.toMatch(/hunter2/)
+  expect(parseCoordinatorReports('bad')).toEqual([])
+})
+
+for (const width of [24, 44, 90]) {
+  test(`Tasks at ${width} columns: two columns, expandable details and a real PR link`, async ($, on) => {
+    engine(on, { status: { ...STATUS, pr: 'https://github.com/example-org/web/pull/12', updated: new Date().toISOString() } })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: width }, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /ETA Madrid/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /ETA UTC/ })).toBe(undefined)
+    expect(await ui.find({ type: 'Text', text: /^Left:/ })).toBe(undefined)
+    await ui.press({ key: 'expand-task-term_t1' })
+    for (const words of [/Left: Review and merge/, /Last update \(Madrid\):/, /Terminal: term_t1/, /Coordinator: Alpha/, /Model: no report yet/]) expect(await ui.find({ type: 'Text', text: words })).toBeDefined()
+    expect((await ui.find({ type: 'Link', text: /pull\/12/ }))?.props.href).toBe('https://github.com/example-org/web/pull/12')
+    await ui.press({ key: 'expand-task-term_t1' })
+    expect(await ui.find({ type: 'Text', text: /^Left:/ })).toBe(undefined)
+    expect((await ui.find({ type: 'Text', text: /^Run mode:/ }))?.props.color).toBe('error')
+    await ui.unmount()
+  })
+}
+
+test('a sub-coordinator keeps its own status row when its terminal is excluded from workers', () => {
+  const config = parseConfig(JSON.stringify({ coordinators: [{ name: 'Root' }, { name: 'Sub', parent: 'Root', terminal: 'term_sub' }] }))
+  const groups = taskGroups(config, [{ name: 'Sub', terminal: 'term_sub', model: '', workers: [], ownTask: { name: 'Sub', state: 'running', handle: 'term_sub', worktreePath: '/w/sub' }, reports: [] }], new Map([['/w/sub', STATUS]]), NOW)
+  expect(groups[0]?.coordinator).toBe('Root / Sub')
+  expect(groups[0]?.rows[0]?.terminal).toBe('term_sub')
+  expect(groups[0]?.rows[0]?.task).toBe('Fix login')
 })

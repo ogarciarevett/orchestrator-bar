@@ -145,6 +145,37 @@ export function parseTerminalWorkers(stdout: string, worktrees: string[], skip: 
     })
 }
 
+// Only explicit status-line labels count; prose mentioning a mode is not evidence.
+export function parseRunMode(stdout: string): string {
+  try {
+    const tail = JSON.parse(stdout)?.result?.terminal?.tail
+    if (!Array.isArray(tail)) return 'no report yet'
+    for (const line of tail.slice(-12).reverse()) {
+      const mode = String(line).match(/(?:^|\s)(?:⏵⏵|⏸|»)\s*(bypass|auto|manual|plan)\b/)?.[1]
+      if (mode) return mode
+      const plain = String(line).match(/^\s*(bypass permissions on|auto mode on|plan mode on|manual mode(?: on)?)\s*$/)?.[1]
+      if (plain) return plain.split(' ')[0]!
+    }
+  } catch {}
+  return 'no report yet'
+}
+
+export function parseCoordinatorReports(stdout: string): TaskStatus[] {
+  try {
+    const tail = JSON.parse(stdout)?.result?.terminal?.tail
+    if (!Array.isArray(tail)) return []
+    const reports = new Map<string, TaskStatus>()
+    for (const line of tail) {
+      const match = String(line).match(/^\s*(?:[⏺•*-]\s*)?(Missing and why|Waiting(?: \(drafts, named blockers\))?):\s*(.+)$/i)
+      if (!match) continue
+      const task = /^waiting/i.test(match[1]!) ? 'Waiting' : 'Missing and why'
+      const left = mask(match[2]!.slice(0, 2000))
+      reports.set(task, { task, left, pr: left.match(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/)?.[0] ?? '', state: 'waiting', eta_utc: '', updated: '' })
+    }
+    return [...reports.values()]
+  } catch { return [] }
+}
+
 // Status text is untrusted: keep only bounded, single-line display fields.
 export function parseTaskStatus(text: string): TaskStatus {
   if (text.length > 16_384) throw new Error('task status too large')
@@ -156,6 +187,26 @@ export function parseTaskStatus(text: string): TaskStatus {
   return Object.fromEntries(fields.map(k => [k, mask(raw[k].replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim())])) as TaskStatus
 }
 
+export const taskValue = (value: string | undefined) => !value || /^(?:stale|unknown|\?|—)$/i.test(value.trim()) ? 'no report yet' : mask(value)
+
+export function taskTitle(value: string, width: number): string {
+  const clean = taskValue(value.split('|')[0]!.replace(/[\u2800-\u28ff●◌◐✓✗■]/g, '').replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim())
+  if (Array.from(clean).length <= width) return clean
+  const words = clean.split(' ')
+  let short = ''
+  for (const word of words) {
+    const next = short ? short + ' ' + word : word
+    if (Array.from(next).length + 1 > width) break
+    short = next
+  }
+  return short ? short + '…' : 'Task'
+}
+
+export function madridTime(value: string, withDate = true): string {
+  if (!value || !Number.isFinite(Date.parse(value))) return 'no report yet'
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', ...(withDate ? { day: '2-digit', month: '2-digit' } as const : {}), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value)).replace(', ', ' ')
+}
+
 export const taskIsStale = (updated: string, now: number) => !updated || now - Date.parse(updated) >= 20 * 60_000 || Date.parse(updated) > now
 
 // Config parents define the hierarchy; terminal path ownership uses the most specific prefix.
@@ -165,14 +216,19 @@ export function taskGroups(config: Config, coordinators: CoordinatorRow[], files
   const visit = (parent?: string, prefix = '') => {
     for (const co of config.coordinators.filter(c => c.parent === parent)) {
       const coordinator = prefix + co.name
-      const rows = (() => { const row = coordinators.find(c => c.name === co.name); return row?.taskWorkers ?? row?.workers ?? [] })()
+      const rows = (() => { const row = coordinators.find(c => c.name === co.name); return [...(row?.taskWorkers ?? row?.workers ?? []), ...(row?.ownTask?.worktreePath && files.has(row.ownTask.worktreePath) ? [row.ownTask] : [])] })()
         .filter(w => w.state !== 'done' && w.state !== 'failed')
         .filter(w => { const key = w.handle ?? co.name + '/' + w.name; if (seen.has(key)) return false; seen.add(key); return true })
         .map(w => {
           const status = w.worktreePath ? files.get(w.worktreePath) : undefined
-          const fallback = { task: w.name, pr: w.pr ? '#' + w.pr : '', state: w.state, left: 'unknown', eta_utc: '', updated: '' }
-          return { ...(status ?? fallback), key: w.handle ?? co.name + '/' + w.name, stale: taskIsStale(status?.updated ?? '', now), fallback: !status }
+          const fallback = { task: w.name, pr: w.pr ? '#' + w.pr : '', state: w.state === 'stale' ? '' : w.state, left: '', eta_utc: '', updated: '' }
+          const data = status ?? fallback
+          const repo = config.repos.find(repo => w.worktreePath?.split('/').includes(repo.split('/')[1]!))
+          const pr = /^#?\d+$/.test(data.pr) && repo ? `https://github.com/${repo}/pull/${data.pr.replace('#', '')}` : data.pr
+          return { ...data, pr, terminal: w.handle ?? '', coordinator, model: w.model ?? '', key: w.handle ?? co.name + '/' + w.name, stale: taskIsStale(status?.updated ?? '', now), fallback: !status }
         })
+      const reports = coordinators.find(c => c.name === co.name)?.reports ?? []
+      for (const report of reports) rows.push({ ...report, key: co.name + '/report/' + report.task, terminal: co.terminal ?? '', coordinator, model: co.model ?? '', stale: false, fallback: false })
       if (rows.length) groups.push({ coordinator, rows })
       visit(co.name, coordinator + ' / ')
     }

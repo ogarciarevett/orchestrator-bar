@@ -44,6 +44,7 @@ export type WorkerRow = {
   pr?: string
   // The terminal it runs in, so one worker is never listed twice; not drawn.
   handle?: string
+  model?: string
   worktreePath?: string
   // When a dispatched worker left the list; it shows as done for an hour.
   doneAt?: number
@@ -56,11 +57,14 @@ export type CoordinatorRow = {
   quietMinutes?: number
   workers: WorkerRow[]
   taskWorkers?: WorkerRow[]
+  ownTask?: WorkerRow
+  reports?: TaskStatus[]
+  runMode?: string
   isWaitingPermission?: boolean
 }
 
 export type TaskStatus = { task: string; pr: string; state: string; left: string; eta_utc: string; updated: string }
-export type TaskRow = TaskStatus & { key: string; stale: boolean; fallback: boolean }
+export type TaskRow = TaskStatus & { key: string; terminal: string; coordinator: string; model: string; stale: boolean; fallback: boolean }
 export type TaskGroup = { coordinator: string; rows: TaskRow[] }
 
 export type EnvRow = { name: string; ready: string; state: string; checkedAt: number }

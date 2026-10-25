@@ -29,11 +29,32 @@ specific matching coordinator. Dispatched workers retain their run's coordinator
 The terminal inventory supplies the worktree path; no filesystem scan is used.
 
 One row appears for each active worker terminal, including workers waiting for
-input or permission. Done and failed workers are omitted. Columns are task, PR,
-state, what is left, ETA (UTC), and last update (UTC). Click a row or select it and
-press Enter to read the full text. No valid status file means a terminal-title
-row, unknown progress and ETA, and a `title only` marker. An update at least 20
-minutes old, missing, or dated in the future is flagged `stale`.
+input or permission. Done and failed workers are omitted. The collapsed row has
+only a short task title and ETA in **Europe/Madrid** time (`DD/MM HH:mm`, including
+daylight saving changes). Titles omit spinner/status glyphs and end between
+words. Click a row or select it and press Enter to open the full title, PR link
+and reported state, what remains, last update in Madrid time, full terminal ID,
+coordinator and reported model. Click again to close it.
+
+Missing values say `no report yet`. Terminal activity does not establish a task
+update or ETA. An old report keeps its actual update time; Tasks never replaces
+its state with a freshness label. Without a valid status file, the terminal title
+supplies the summary and the remaining fields stay unreported. Supply a full
+GitHub PR URL for a reliable link. A numeric PR label becomes a link when the
+worker's path contains a repository name listed in config.
+
+Explicit `Missing and why:` and `Waiting (drafts, named blockers):` lines from a
+coordinator's current terminal screen also appear as expandable report rows.
+Only those lines are retained; arbitrary terminal output is not displayed.
+Their ETA and update time stay unreported unless supplied by a task status file.
+There is no BENCH parser.
+
+Each configured coordinator, including entries with `parent`, shows a run-mode
+line read from the bottom of its terminal screen. Recognized status labels are
+`bypass`, `auto`, `plan`, and `manual`. Bypass is green; every other value,
+including `no report yet`, is red. Role documents describe expected modes;
+they never establish the mode actually running. Keep configured terminal handles
+current after a restart. No session transcript content is collected.
 
 Only the configured session reads files. It uses the existing 10-second local
 timer and 15-second cache TTL (one read per distinct active worktree per TTL),
